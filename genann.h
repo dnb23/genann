@@ -40,7 +40,7 @@ extern "C" {
 #endif
 
 
-typedef double (*genann_actfun)(double a);
+  typedef double (*genann_actfun)(double a,double *b);
 
 
 typedef struct genann {
@@ -48,7 +48,11 @@ typedef struct genann {
     int inputs, hidden_layers, hidden, outputs;
 
     /* Which activation function to use for hidden neurons. Default: gennann_act_sigmoid_cached*/
-    genann_actfun activation_hidden;
+    /* List of activation functions for hidden layer */
+    genann_actfun *activation_hidden;
+
+    /* List of activation bias */
+    double *bias;
 
     /* Which activation function to use for output. Default: gennann_act_sigmoid_cached*/
     genann_actfun activation_output;
@@ -73,16 +77,12 @@ typedef struct genann {
 
 
 /* Creates and returns a new ann. */
-genann *genann_init(int inputs, int hidden_layers, int hidden, int outputs);
+  genann *genann_init(int inputs, int hidden_layers, int hidden, int outputs,genann_actfun *actfuns);
 
-/* Creates ANN from file saved with genann_write. */
-genann *genann_read(FILE *in);
 
 /* Sets weights randomly. Called by init. */
 void genann_randomize(genann *ann);
 
-/* Returns a new copy of ann. */
-genann *genann_copy(genann const *ann);
 
 /* Frees the memory used by an ann. */
 void genann_free(genann *ann);
@@ -91,16 +91,12 @@ void genann_free(genann *ann);
 double const *genann_run(genann const *ann, double const *inputs);
 
 /* Does a single backprop update. */
-void genann_train(genann const *ann, double const *inputs, double const *desired_outputs, double learning_rate);
-
-/* Saves the ann. */
-void genann_write(genann const *ann, FILE *out);
+  void genann_train(genann const *ann, double const *inputs, double const *desired_outputs, double learning_rate,double system,double response);
 
 
-double genann_act_sigmoid(double a);
-double genann_act_sigmoid_cached(double a);
-double genann_act_threshold(double a);
-double genann_act_linear(double a);
+  double genann_act_sigmoid(double a,double *b);
+double custom_act_sigmoid_I(double a,double *b);
+double custom_act_sigmoid_D(double a,double *b);
 
 
 #ifdef __cplusplus

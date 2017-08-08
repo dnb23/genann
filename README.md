@@ -1,3 +1,7 @@
+# Genann PID Neural Network
+
+This is a modified version of Genann used for recursive neural network for use in PID neural network (PIDNN) controller.
+
 [![Build Status](https://travis-ci.org/codeplea/genann.svg?branch=master)](https://travis-ci.org/codeplea/genann)
 
 <img alt="Genann logo" src="https://codeplea.com/public/content/genann_logo.png" align="right" />

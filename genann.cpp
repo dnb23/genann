@@ -28,74 +28,47 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <assert.h>
+//#include <assert.h>
 #include <stdio.h>
 
-#define LOOKUP_SIZE 4096
 
-double genann_act_sigmoid(double a) {
+double genann_act_sigmoid(double a,double *bias) {
     if (a < -45.0) return 0;
     if (a > 45.0) return 1;
     return 1.0 / (1 + exp(-a));
 }
 
+double custom_act_sigmoid_I(double a,double *bias) {
+  double sig = genann_act_sigmoid(a + *bias,NULL);
+  *bias = sig;
+  return sig;
+}
 
-double genann_act_sigmoid_cached(double a) {
-    /* If you're optimizing for memory usage, just
-     * delete this entire function and replace references
-     * of genann_act_sigmoid_cached to genann_act_sigmoid
-     */
-    const double min = -15.0;
-    const double max = 15.0;
-    static double interval;
-    static int initialized = 0;
-    static double lookup[LOOKUP_SIZE];
-
-    /* Calculate entire lookup table on first run. */
-    if (!initialized) {
-        interval = (max - min) / LOOKUP_SIZE;
-        int i;
-        for (i = 0; i < LOOKUP_SIZE; ++i) {
-            lookup[i] = genann_act_sigmoid(min + interval * i);
-        }
-        /* This is down here to make this thread safe. */
-        initialized = 1;
-    }
-
-    int i;
-    i = (int)((a-min)/interval+0.5);
-    if (i <= 0) return lookup[0];
-    if (i >= LOOKUP_SIZE) return lookup[LOOKUP_SIZE-1];
-    return lookup[i];
+double custom_act_sigmoid_D(double a,double *bias) {
+  double sig = genann_act_sigmoid(a - *bias,NULL);
+  *bias = a;
+  return sig;
 }
 
 
-double genann_act_threshold(double a) {
-    return a > 0;
-}
 
-
-double genann_act_linear(double a) {
-    return a;
-}
-
-
-genann *genann_init(int inputs, int hidden_layers, int hidden, int outputs) {
-    if (hidden_layers < 0) return 0;
-    if (inputs < 1) return 0;
-    if (outputs < 1) return 0;
-    if (hidden_layers > 0 && hidden < 1) return 0;
+genann *genann_init(int inputs, int hidden_layers, int hidden, int outputs,genann_actfun actfs[]) {
+  //    if (hidden_layers < 0) return 0;
+  //    if (inputs < 1) return 0;
+  //    if (outputs < 1) return 0;
+  //    if (hidden_layers > 0 && hidden < 1) return 0;
 
 
     const int hidden_weights = hidden_layers ? (inputs+1) * hidden + (hidden_layers-1) * (hidden+1) * hidden : 0;
     const int output_weights = (hidden_layers ? (hidden+1) : (inputs+1)) * outputs;
     const int total_weights = (hidden_weights + output_weights);
+    const int hidden_neurons = (hidden * hidden_layers);
+    const int total_neurons = (inputs + hidden_neurons + outputs);
 
-    const int total_neurons = (inputs + hidden * hidden_layers + outputs);
 
     /* Allocate extra size for weights, outputs, and deltas. */
-    const int size = sizeof(genann) + sizeof(double) * (total_weights + total_neurons + (total_neurons - inputs));
-    genann *ret = malloc(size);
+    const int size = sizeof(genann) + sizeof(double) * (total_weights + total_neurons + (total_neurons - inputs) + hidden_neurons) + hidden_neurons * sizeof(genann_actfun);
+    genann *ret = static_cast<genann*>(malloc(size));
     if (!ret) return 0;
 
     ret->inputs = inputs;
@@ -110,34 +83,23 @@ genann *genann_init(int inputs, int hidden_layers, int hidden, int outputs) {
     ret->weight = (double*)((char*)ret + sizeof(genann));
     ret->output = ret->weight + ret->total_weights;
     ret->delta = ret->output + ret->total_neurons;
-
+    ret->bias = ret->delta + ret->total_neurons;
     genann_randomize(ret);
 
-    ret->activation_hidden = genann_act_sigmoid_cached;
-    ret->activation_output = genann_act_sigmoid_cached;
+    for (int i=0;i<hidden_neurons;++i) {
+      ret->bias[i] = 0.0;
+    }
+    ret->activation_hidden = actfs;
+    ret->activation_output = genann_act_sigmoid;
 
     return ret;
 }
 
 
-genann *genann_read(FILE *in) {
-    int inputs, hidden_layers, hidden, outputs;
-    fscanf(in, "%d %d %d %d", &inputs, &hidden_layers, &hidden, &outputs);
-
-    genann *ann = genann_init(inputs, hidden_layers, hidden, outputs);
-
-    int i;
-    for (i = 0; i < ann->total_weights; ++i) {
-        fscanf(in, " %le", ann->weight + i);
-    }
-
-    return ann;
-}
-
-
 genann *genann_copy(genann const *ann) {
     const int size = sizeof(genann) + sizeof(double) * (ann->total_weights + ann->total_neurons + (ann->total_neurons - ann->inputs));
-    genann *ret = malloc(size);
+
+    genann *ret = static_cast<genann*>(malloc(size));
     if (!ret) return 0;
 
     memcpy(ret, ann, size);
@@ -148,6 +110,7 @@ genann *genann_copy(genann const *ann) {
     ret->delta = ret->output + ret->total_neurons;
 
     return ret;
+
 }
 
 
@@ -178,12 +141,13 @@ double const *genann_run(genann const *ann, double const *inputs) {
 
     int h, j, k;
 
-    const genann_actfun act = ann->activation_hidden;
+    //    const genann_actfun act = ann->activation_hidden;
     const genann_actfun acto = ann->activation_output;
 
     /* Figure hidden layers, if any. */
     for (h = 0; h < ann->hidden_layers; ++h) {
         for (j = 0; j < ann->hidden; ++j) {
+          genann_actfun act = ann->activation_hidden[h*ann->hidden+j];
             double sum = 0;
             for (k = 0; k < (h == 0 ? ann->inputs : ann->hidden) + 1; ++k) {
                 if (k == 0) {
@@ -192,7 +156,9 @@ double const *genann_run(genann const *ann, double const *inputs) {
                     sum += *w++ * i[k-1];
                 }
             }
-            *o++ = act(sum);
+
+
+            *o++ = act(sum,ann->bias+h*ann->hidden + j);
         }
 
 
@@ -211,20 +177,23 @@ double const *genann_run(genann const *ann, double const *inputs) {
                 sum += *w++ * i[k-1];
             }
         }
-        *o++ = acto(sum);
+        *o++ = acto(sum,NULL);
     }
 
     /* Sanity check that we used all weights and wrote all outputs. */
-    assert(w - ann->weight == ann->total_weights);
-    assert(o - ann->output == ann->total_neurons);
+    //    assert(w - ann->weight == ann->total_weights);
+    //    assert(o - ann->output == ann->total_neurons);
 
     return ret;
 }
 
 
-void genann_train(genann const *ann, double const *inputs, double const *desired_outputs, double learning_rate) {
+
+
+
+void genann_train(genann const *ann, double const *inputs, double const *desired_outputs, double learning_rate,double K,double response) {
     /* To begin with, we must run the network forward. */
-    genann_run(ann, inputs);
+  //    genann_run(ann, inputs);
 
     int h, j, k;
 
@@ -236,16 +205,11 @@ void genann_train(genann const *ann, double const *inputs, double const *desired
 
 
         /* Set output layer deltas. */
-        if (ann->activation_output == genann_act_linear) {
+
             for (j = 0; j < ann->outputs; ++j) {
-                *d++ = *t++ - *o++;
-            }
-        } else {
-            for (j = 0; j < ann->outputs; ++j) {
-                *d++ = (*t - *o) * *o * (1.0 - *o);
+              *d++ = (*t - K) * *o * (1.0 - *o) * response;
                 ++o; ++t;
             }
-        }
     }
 
 
@@ -308,7 +272,7 @@ void genann_train(genann const *ann, double const *inputs, double const *desired
             ++d;
         }
 
-        assert(w - ann->weight == ann->total_weights);
+        //assert(w - ann->weight == ann->total_weights);
     }
 
 
@@ -344,14 +308,14 @@ void genann_train(genann const *ann, double const *inputs, double const *desired
 
 }
 
-
 void genann_write(genann const *ann, FILE *out) {
-    fprintf(out, "%d %d %d %d", ann->inputs, ann->hidden_layers, ann->hidden, ann->outputs);
+  fprintf(out, "%d,%d,%d,%d", ann->inputs, ann->hidden_layers, ann->hidden, ann->outputs);
 
-    int i;
-    for (i = 0; i < ann->total_weights; ++i) {
-        fprintf(out, " %.20e", ann->weight[i]);
-    }
+  int i;
+  for (i = 0; i < ann->total_weights; ++i) {
+    fprintf(out, ",%.20e", ann->weight[i]);
+  }
 }
+
 
 

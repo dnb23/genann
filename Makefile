@@ -10,6 +10,10 @@ test: test.o genann.o
 	./$@
 
 
+
+pidsim: pidsim.o genann.o
+	$(CC) $(CCFLAGS) -o $@ $^ $(LFLAGS)
+
 example1: example1.o genann.o
 	$(CC) $(CCFLAGS) -o $@ $^ $(LFLAGS)
 
